@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Student Assignment Submission System.
+"""Assignment Hub — Student Assignment Submission System.
 
 Standard library only (Python 3.9+).
 
@@ -188,7 +188,7 @@ def parse_multipart(content_type, body):
     fields, files = {}, {}
     for part in body.split(b"--" + boundary):
         if not part.startswith(b"\r\n"):
-            continue  # preamble or closing marker
+            continue
         part = part[2:]
         if part.endswith(b"\r\n"):
             part = part[:-2]
@@ -213,26 +213,37 @@ def parse_multipart(content_type, body):
 # ---------------------------------------------------------------- HTML
 
 CSS = """
-body{font-family:system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1d1d1f}
-header{background:#1f3a5f;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
-header a{color:#fff;margin-left:14px;text-decoration:none}
-nav{display:flex;align-items:center;flex-wrap:wrap}
-nav form{display:inline;margin:0 0 0 14px}
-nav button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:3px 10px;cursor:pointer;font:inherit}
-main{max-width:960px;margin:24px auto;background:#fff;padding:24px 32px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
-h1{margin-top:0;font-size:1.6rem}
-label{display:block;margin:12px 0}
-input,textarea{display:block;width:100%;box-sizing:border-box;padding:8px;margin-top:4px;border:1px solid #bbb;border-radius:4px;font:inherit}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f4f6fa;color:#1d2433}
+header{background:#1f3a5f;color:#fff;padding:14px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;box-shadow:0 2px 6px rgba(15,23,42,.12)}
+.brand{font-weight:700;font-size:1.1rem;letter-spacing:.01em;color:#fff;text-decoration:none}
+nav{display:flex;align-items:center;flex-wrap:wrap;gap:22px}
+nav a{color:#dce7f7;text-decoration:none;padding:6px 4px;border-bottom:2px solid transparent;font-weight:500;transition:color .15s,border-color .15s}
+nav a:hover,nav a:focus-visible{color:#fff;border-bottom-color:rgba(255,255,255,.55);outline:none}
+nav a.active{color:#fff;border-bottom-color:#8ab4f8;font-weight:600}
+.nav-user{color:#cfe0f5;font-size:.9rem;padding-left:6px}
+nav form{display:inline;margin:0}
+nav button{background:transparent;border:1px solid rgba(255,255,255,.7);color:#fff;border-radius:5px;padding:5px 12px;cursor:pointer;font:inherit;font-size:.9rem}
+nav button:hover{background:rgba(255,255,255,.12)}
+main{max-width:980px;margin:28px auto;background:#fff;padding:26px 32px;border-radius:10px;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+h1{margin-top:0;font-size:1.6rem;color:#162942}
+label{display:block;margin:12px 0;font-weight:500;color:#243044}
+input,textarea{display:block;width:100%;padding:9px 11px;margin-top:5px;border:1px solid #c5d0df;border-radius:6px;font:inherit;background:#fff;color:#1d2433}
+input:focus,textarea:focus{outline:none;border-color:#2b5284;box-shadow:0 0 0 3px rgba(43,82,132,.14)}
 textarea{min-height:120px}
-button,.btn{background:#1f3a5f;color:#fff;border:0;border-radius:4px;padding:9px 16px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block;margin-top:8px}
+button,.btn{background:#1f3a5f;color:#fff;border:0;border-radius:6px;padding:9px 16px;font:inherit;font-weight:500;cursor:pointer;text-decoration:none;display:inline-block;margin-top:8px}
+button:hover,.btn:hover{background:#2b5284}
+.btn-secondary{background:#eef3f9;color:#1f3a5f;border:1px solid #c4d2e4}
+.btn-secondary:hover{background:#e1eaf5}
 table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e3e3e3;vertical-align:middle}
-.notice{background:#e8f4ea;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:4px}
-.error{background:#fdecea;border-left:4px solid #c62828;padding:10px 14px;border-radius:4px}
+th,td{text-align:left;padding:11px 10px;border-bottom:1px solid #e5e9f0;vertical-align:middle}
+th{color:#334155;font-size:.88rem;text-transform:uppercase;letter-spacing:.03em}
+.notice{background:#e8f4ea;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:6px}
+.error{background:#fdecea;border-left:4px solid #c62828;padding:10px 14px;border-radius:6px}
 .late{color:#b26a00;font-weight:600}
-.muted{color:#666}
+.muted{color:#5e6b7e}
 .small{font-size:.82rem}
-.time-hint{display:block;font-size:.82rem;color:#555;margin-top:2px}
+.time-hint{display:block;font-size:.82rem;color:#5e6b7e;margin-top:2px}
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:.82rem;font-weight:600;white-space:nowrap}
 .badge-open{background:#e6f4ea;color:#1e6e34}
 .badge-past-due{background:#fdecea;color:#b71c1c}
@@ -240,14 +251,34 @@ th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e3e3e3;vertical-
 .badge-missing{background:#fff4e5;color:#9a5b00}
 .badge-late{background:#fff4e5;color:#9a5b00}
 .badge-edited{background:#e8f0fe;color:#174ea6;margin-left:6px}
-.edit-box{background:#f8fafc;border:1px solid #d8e1eb;border-radius:6px;padding:14px 18px;margin-top:16px}
+.edit-box{background:#f8fafc;border:1px solid #d8e1eb;border-radius:8px;padding:14px 18px;margin-top:16px}
 .summary-bar{display:flex;gap:12px;margin:12px 0 18px;flex-wrap:wrap}
-.summary-card{flex:1;min-width:150px;background:#f8fafc;border:1px solid #d8e1eb;border-radius:6px;padding:12px 16px}
+.summary-card{flex:1;min-width:150px;background:#f8fafc;border:1px solid #d8e1eb;border-radius:8px;padding:12px 16px}
 .summary-card span{font-size:.85rem;color:#555}
 .summary-card strong{display:block;font-size:1.45rem;color:#1f3a5f;margin-top:2px}
 .summary-card.card-submitted{border-left:4px solid #2e7d32}
 .summary-card.card-pending{border-left:4px solid #ed6c02}
 .summary-card.card-missing{border-left:4px solid #c62828}
+
+/* Split landing / auth layout (no top tabs before login) */
+body.auth-page{background:#eef2f7;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-shell{display:grid;grid-template-columns:320px 1fr;max-width:960px;width:100%;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 32px rgba(20,38,66,.12)}
+.auth-brand{background:linear-gradient(165deg,#1f3a5f 0%,#2b5284 100%);color:#fff;padding:36px 28px;display:flex;flex-direction:column;justify-content:space-between}
+.auth-brand h1{color:#fff;font-size:1.7rem;margin:0 0 10px}
+.auth-brand p{color:#dce7f7;margin:0;line-height:1.5;font-size:.95rem}
+.auth-brand-tag{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:#a9c7f2;margin-bottom:8px;display:block;font-weight:600}
+.auth-brand-foot{font-size:.82rem;color:#b8cde9;margin-top:28px}
+.auth-content{padding:32px 36px;background:#f9fbfe}
+.auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+.auth-card{background:#fff;border:1px solid #dde5f0;border-radius:10px;padding:22px}
+.auth-card h2{margin:0 0 6px;font-size:1.15rem;color:#1f3a5f}
+.auth-card p.card-sub{margin:0 0 14px;font-size:.88rem;color:#5c6a7e;line-height:1.45}
+.auth-actions{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.auth-actions .btn{margin-top:0;text-align:center}
+@media(max-width:780px){
+  .auth-shell{grid-template-columns:1fr}
+  .auth-grid{grid-template-columns:1fr}
+}
 """
 
 
@@ -255,53 +286,102 @@ def error_block(message):
     return f'<p class="error">{esc(message)}</p>' if message else ""
 
 
-def layout(title, body, user, msg="", err=""):
-    if user:
-        links = ['<a href="/assignments">Assignments</a>']
-        if user["role"] == "student":
-            links.append('<a href="/my-submissions">My submissions</a>')
-        else:
-            links.append('<a href="/lecturer/assignments/new">New assignment</a>')
-        links.append(f"<span>{esc(user['name'])} ({esc(user['role'])})</span>")
-        links.append('<form method="post" action="/logout"><button>Log out</button></form>')
-    else:
-        links = ['<a href="/login">Log in</a>', '<a href="/register">Register</a>']
-    nav_html = "".join(links)
+def layout(title, body, user, msg="", err="", active_path=""):
     notices = ""
     if msg:
         notices += f'<p class="notice">{esc(msg)}</p>'
     if err:
         notices += f'<p class="error">{esc(err)}</p>'
+
+    if not user:
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(title)} | Assignment Hub</title>
+<style>{CSS}</style></head>
+<body class="auth-page">
+<div class="auth-shell">
+  <aside class="auth-brand">
+    <div>
+      <span class="auth-brand-tag">Coursework Portal</span>
+      <h1>Assignment Hub</h1>
+      <p>Submit coursework files, track due dates, and manage submissions in one place.</p>
+    </div>
+    <div class="auth-brand-foot">Assignment Hub &middot; University Coursework System</div>
+  </aside>
+  <section class="auth-content">
+    {notices}
+    {body}
+  </section>
+</div>
+</body></html>"""
+
+    nav_items = [
+        ("/assignments", "Assignments", active_path.startswith("/assignments")),
+    ]
+    if user["role"] == "student":
+        nav_items.append(("/my-submissions", "My Submissions", active_path == "/my-submissions"))
+    else:
+        nav_items.append(("/lecturer/assignments/new", "New Assignment", active_path == "/lecturer/assignments/new"))
+
+    links = [
+        f'<a href="{href}"{" class=\"active\"" if is_active else ""}>{esc(label)}</a>'
+        for href, label, is_active in nav_items
+    ]
+    links.append(f'<span class="nav-user">{esc(user["name"])} ({esc(user["role"])})</span>')
+    links.append('<form method="post" action="/logout"><button>Log out</button></form>')
+    nav_html = "".join(links)
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(title)} | Assignment Submission</title>
+<title>{esc(title)} | Assignment Hub</title>
 <style>{CSS}</style></head>
 <body>
-<header><strong>Assignment Submission System</strong><nav>{nav_html}</nav></header>
+<header>
+  <a class="brand" href="/assignments">Assignment Hub</a>
+  <nav aria-label="Primary navigation">{nav_html}</nav>
+</header>
 <main>{notices}<h1>{esc(title)}</h1>{body}</main>
 </body></html>"""
 
 
 def register_form_html(error="", name="", email=""):
-    return f"""{error_block(error)}
+    return f"""<h1>Register as a Student</h1>
+<p class="muted">Create a student account with your @uni.edu email address.</p>
+{error_block(error)}
 <form method="post" action="/register">
 <label>Full name <input name="name" value="{esc(name)}" maxlength="100" required></label>
-<label>Email (@uni.edu) <input type="email" name="email" value="{esc(email)}" required></label>
+<label>University Email (@uni.edu) <input type="email" name="email" value="{esc(email)}" required></label>
 <label>Password (at least 12 characters) <input type="password" name="password" minlength="12" required></label>
-<button>Create account</button>
+<button>Register as Student</button>
 </form>
-<p class="muted">Lecturer accounts are created by the system administrator.</p>"""
+<p class="muted small">Already have a student account? <a href="/login">Student Login</a></p>"""
 
 
-def login_form_html(error=""):
+def login_form_html(error="", mode="lecturer"):
+    student_login_active = (mode == "student")
     return f"""{error_block(error)}
-<form method="post" action="/login">
-<label>Email <input type="email" name="email" required></label>
-<label>Password <input type="password" name="password" required></label>
-<button>Log in</button>
-</form>
-<p>No account yet? <a href="/register">Register as a student</a></p>"""
+<div class="auth-grid">
+  <div class="auth-card">
+    <h2>Lecturer Sign In</h2>
+    <p class="card-sub">Sign in with your lecturer credentials to publish assignments and review submissions.</p>
+    <form method="post" action="/login">
+      <label>Email <input type="email" name="email" required></label>
+      <label>Password <input type="password" name="password" required></label>
+      <button>Lecturer Sign In</button>
+    </form>
+  </div>
+  <div class="auth-card">
+    <h2>Student Portal</h2>
+    <p class="card-sub">Access your assignments and submissions, or register a new @uni.edu student account.</p>
+    <div class="auth-actions">
+      <a class="btn" href="/login?role=student">Student Login</a>
+      <a class="btn btn-secondary" href="/register">Register as Student</a>
+    </div>
+    {"<form method=\"post\" action=\"/login\" style=\"margin-top:16px;padding-top:14px;border-top:1px solid #e5e9f0\"><p class=\"card-sub\" style=\"margin-bottom:8px\"><strong>Student Sign In</strong></p><label>Student Email <input type=\"email\" name=\"email\" required></label><label>Password <input type=\"password\" name=\"password\" required></label><button>Log in as Student</button></form>" if student_login_active else ""}
+  </div>
+</div>"""
 
 
 def assignment_form_html(error="", title="", description="", due_raw=""):
@@ -473,6 +553,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def dispatch(self, method):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        self._current_path = path
         self.query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         try:
             for route_method, pattern, handler_name in ROUTES:
@@ -489,7 +570,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.deny(413, "Upload too large", "Files must be 10 MB or smaller.")
         except ValueError as exc:
             self.deny(400, "Bad request", f"The request could not be read ({exc}).")
-        except Exception as exc:  # keep the server running; log for the developer
+        except Exception as exc:
             sys.stderr.write(f"Unhandled error on {method} {path}: {exc!r}\n")
             self.deny(500, "Server error", "Something went wrong. Please try again.")
 
@@ -497,8 +578,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def send_page(self, title, body, status=200, headers=()):
         user = self.current_user()
+        active_path = getattr(self, "_current_path", "")
         data = layout(title, body, user, self.query.get("msg", ""),
-                      self.query.get("err", "")).encode("utf-8")
+                      self.query.get("err", ""), active_path=active_path).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -583,7 +665,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def register_form(self):
         if self.current_user():
             return self.send_redirect("/assignments")
-        self.send_page("Create a student account", register_form_html())
+        self.send_page("Register as Student", register_form_html())
 
     def register_submit(self):
         fields, _ = self.read_form()
@@ -605,7 +687,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except sqlite3.IntegrityError:
                 error = "An account with that email already exists."
         if error:
-            return self.send_page("Create a student account",
+            return self.send_page("Register as Student",
                                   register_form_html(error, name, email), status=400)
         cookie = self.start_session(user_id)
         self.send_redirect("/assignments?msg=" + quote("Welcome! Your account is ready."),
@@ -614,7 +696,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def login_form(self):
         if self.current_user():
             return self.send_redirect("/assignments")
-        self.send_page("Log in", login_form_html())
+        mode = "student" if self.query.get("role") == "student" else "lecturer"
+        self.send_page("Log in", login_form_html(mode=mode))
 
     def login_submit(self):
         fields, _ = self.read_form()
@@ -623,7 +706,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with closing(connect()) as conn:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if row is None:
-            hash_password(password)  # equalise timing with the real-account path
+            hash_password(password)
             valid = False
         else:
             valid = verify_password(password, row["password_hash"])
@@ -848,7 +931,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 """,
                 (user["id"], user["id"]),
             ).fetchall()
-        self.send_page("My submissions", my_submissions_html(rows))
+        self.send_page("My Submissions", my_submissions_html(rows))
 
     # ----- routes: lecturer
 
