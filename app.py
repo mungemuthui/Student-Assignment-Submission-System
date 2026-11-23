@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     size_bytes INTEGER NOT NULL,
     submitted_at TEXT NOT NULL,
     updated_at TEXT,
+    edit_count INTEGER NOT NULL DEFAULT 0,
     is_late INTEGER NOT NULL DEFAULT 0
 );
 """
@@ -105,7 +106,9 @@ def init_db():
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(submissions)").fetchall()}
         if "updated_at" not in cols:
             conn.execute("ALTER TABLE submissions ADD COLUMN updated_at TEXT")
-            conn.commit()
+        if "edit_count" not in cols:
+            conn.execute("ALTER TABLE submissions ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
 
 
 def now_iso():
@@ -115,6 +118,31 @@ def now_iso():
 def display_time(stored):
     dt = datetime.strptime(stored, DATE_FMT)
     return dt.strftime("%d %b %Y, %H:%M UTC")
+
+
+def format_time_delta(due_iso, now_dt=None):
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    due_dt = datetime.strptime(due_iso, DATE_FMT).replace(tzinfo=timezone.utc)
+    seconds = int((due_dt - now_dt).total_seconds())
+    if seconds >= 0:
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        mins = rem // 60
+        if days >= 1:
+            return f"Due in {days}d {hours}h"
+        if hours >= 1:
+            return f"Due in {hours}h {mins}m"
+        return f"Due in {max(1, mins)}m"
+    overdue = abs(seconds)
+    days, rem = divmod(overdue, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+    if days >= 1:
+        return f"Overdue by {days}d {hours}h"
+    if hours >= 1:
+        return f"Overdue by {hours}h {mins}m"
+    return f"Overdue by {max(1, mins)}m"
 
 
 def esc(value):
@@ -191,7 +219,7 @@ header a{color:#fff;margin-left:14px;text-decoration:none}
 nav{display:flex;align-items:center;flex-wrap:wrap}
 nav form{display:inline;margin:0 0 0 14px}
 nav button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:3px 10px;cursor:pointer;font:inherit}
-main{max-width:940px;margin:24px auto;background:#fff;padding:24px 32px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+main{max-width:960px;margin:24px auto;background:#fff;padding:24px 32px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 h1{margin-top:0;font-size:1.6rem}
 label{display:block;margin:12px 0}
 input,textarea{display:block;width:100%;box-sizing:border-box;padding:8px;margin-top:4px;border:1px solid #bbb;border-radius:4px;font:inherit}
@@ -203,6 +231,8 @@ th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e3e3e3;vertical-
 .error{background:#fdecea;border-left:4px solid #c62828;padding:10px 14px;border-radius:4px}
 .late{color:#b26a00;font-weight:600}
 .muted{color:#666}
+.small{font-size:.82rem}
+.time-hint{display:block;font-size:.82rem;color:#555;margin-top:2px}
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:.82rem;font-weight:600;white-space:nowrap}
 .badge-open{background:#e6f4ea;color:#1e6e34}
 .badge-past-due{background:#fdecea;color:#b71c1c}
@@ -211,6 +241,13 @@ th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e3e3e3;vertical-
 .badge-late{background:#fff4e5;color:#9a5b00}
 .badge-edited{background:#e8f0fe;color:#174ea6;margin-left:6px}
 .edit-box{background:#f8fafc;border:1px solid #d8e1eb;border-radius:6px;padding:14px 18px;margin-top:16px}
+.summary-bar{display:flex;gap:12px;margin:12px 0 18px;flex-wrap:wrap}
+.summary-card{flex:1;min-width:150px;background:#f8fafc;border:1px solid #d8e1eb;border-radius:6px;padding:12px 16px}
+.summary-card span{font-size:.85rem;color:#555}
+.summary-card strong{display:block;font-size:1.45rem;color:#1f3a5f;margin-top:2px}
+.summary-card.card-submitted{border-left:4px solid #2e7d32}
+.summary-card.card-pending{border-left:4px solid #ed6c02}
+.summary-card.card-missing{border-left:4px solid #c62828}
 """
 
 
@@ -277,17 +314,28 @@ def assignment_form_html(error="", title="", description="", due_raw=""):
 </form>"""
 
 
+def edited_badge_html(edit_count, updated_at=None):
+    count = edit_count or 0
+    if count > 0:
+        return f'<span class="badge badge-edited">Edited {count}x</span>'
+    if updated_at:
+        return '<span class="badge badge-edited">Edited</span>'
+    return ""
+
+
 def student_assignments_html(rows):
     if not rows:
         return "<p>No assignments have been published yet.</p>"
     now = now_iso()
+    now_dt = datetime.now(timezone.utc)
     items = []
     for a in rows:
         is_past_due = now > a["due_at"]
         deadline = ('<span class="badge badge-past-due">Past due</span>'
                     if is_past_due else '<span class="badge badge-open">Open</span>')
+        countdown = format_time_delta(a["due_at"], now_dt)
         if a["mine"]:
-            edited_tag = '<span class="badge badge-edited">Edited</span>' if a["edited"] else ""
+            edited_tag = edited_badge_html(a["edit_count"], a["updated_at"])
             status = f'<span class="badge badge-submitted">Submitted</span>{edited_tag}'
             action = (f'<a href="/assignments/{a["id"]}">View</a>'
                       if is_past_due else f'<a href="/assignments/{a["id"]}">Edit submission</a>')
@@ -299,8 +347,8 @@ def student_assignments_html(rows):
             action = f'<a href="/assignments/{a["id"]}">Submit</a>'
         items.append(
             f'<tr><td><a href="/assignments/{a["id"]}">{esc(a["title"])}</a></td>'
-            f'<td>{display_time(a["due_at"])}</td><td>{deadline}</td>'
-            f'<td>{status}</td><td>{action}</td></tr>'
+            f'<td>{display_time(a["due_at"])}<span class="time-hint">{esc(countdown)}</span></td>'
+            f'<td>{deadline}</td><td>{status}</td><td>{action}</td></tr>'
         )
     return ("<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Deadline</th>"
             "<th>Your status</th><th>Action</th></tr>" + "".join(items) + "</table>")
@@ -311,12 +359,15 @@ def lecturer_assignments_html(rows):
     if not rows:
         return button + "<p>You have not created any assignments yet.</p>"
     now = now_iso()
+    now_dt = datetime.now(timezone.utc)
     items = []
     for a in rows:
         deadline = ('<span class="badge badge-past-due">Past due</span>'
                     if now > a["due_at"] else '<span class="badge badge-open">Open</span>')
+        countdown = format_time_delta(a["due_at"], now_dt)
         items.append(
-            f'<tr><td>{esc(a["title"])}</td><td>{display_time(a["due_at"])}</td>'
+            f'<tr><td>{esc(a["title"])}</td>'
+            f'<td>{display_time(a["due_at"])}<span class="time-hint">{esc(countdown)}</span></td>'
             f'<td>{deadline}</td><td>{a["n"]}</td>'
             f'<td><a href="/lecturer/assignments/{a["id"]}/submissions">View submissions</a></td></tr>'
         )
@@ -328,34 +379,51 @@ def my_submissions_html(rows):
     if not rows:
         return "<p>There are no assignments yet.</p>"
     now = now_iso()
+    now_dt = datetime.now(timezone.utc)
+    submitted_count = 0
+    pending_count = 0
+    missing_count = 0
     items = []
     for r in rows:
         is_past_due = now > r["due_at"]
+        countdown = format_time_delta(r["due_at"], now_dt)
         if r["sid"] is None:
             if is_past_due:
+                missing_count += 1
                 status = '<span class="badge badge-past-due">Not submitted &middot; Past due</span>'
                 action = f'<a href="/assignments/{r["id"]}">Submit late</a>'
             else:
+                pending_count += 1
                 status = '<span class="badge badge-missing">Not submitted</span>'
                 action = f'<a href="/assignments/{r["id"]}">Submit</a>'
             file_cell = "&mdash;"
             when = "&mdash;"
         else:
+            submitted_count += 1
             base_badge = ('<span class="badge badge-late">Submitted late</span>'
                           if r["is_late"] else '<span class="badge badge-submitted">Submitted on time</span>')
-            edited_badge = '<span class="badge badge-edited">Edited</span>' if r["updated_at"] else ""
+            edited_badge = edited_badge_html(r["edit_count"], r["updated_at"])
             status = base_badge + edited_badge
             file_cell = f'<a href="/submissions/{r["sid"]}/download">{esc(r["original_name"])}</a>'
             when = display_time(r["submitted_at"])
+            if r["updated_at"]:
+                when += f'<br><span class="muted small">Last updated {display_time(r["updated_at"])}</span>'
             action = ('<span class="muted">Locked (past due)</span>'
                       if is_past_due else f'<a href="/assignments/{r["id"]}">Edit submission</a>')
         items.append(
             f'<tr><td><a href="/assignments/{r["id"]}">{esc(r["title"])}</a></td>'
-            f'<td>{display_time(r["due_at"])}</td>'
+            f'<td>{display_time(r["due_at"])}<span class="time-hint">{esc(countdown)}</span></td>'
             f"<td>{status}</td><td>{when}</td><td>{file_cell}</td>"
             f"<td>{r['attempts']}</td><td>{action}</td></tr>"
         )
-    return ("<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Status</th><th>Submitted</th>"
+    summary = (
+        '<div class="summary-bar">'
+        f'<div class="summary-card card-submitted"><span>Submitted</span><strong>{submitted_count}</strong></div>'
+        f'<div class="summary-card card-pending"><span>Pending (Open)</span><strong>{pending_count}</strong></div>'
+        f'<div class="summary-card card-missing"><span>Past Due / Missing</span><strong>{missing_count}</strong></div>'
+        "</div>"
+    )
+    return (summary + "<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Status</th><th>Submitted</th>"
             "<th>Latest file</th><th>Attempts</th><th>Action</th></tr>" + "".join(items) + "</table>")
 
 
@@ -364,16 +432,21 @@ def submissions_table_html(rows, show_student):
         return "<p>No submissions yet.</p>"
     items = []
     for r in rows:
+        keys = set(r.keys())
+        edit_count = r["edit_count"] if "edit_count" in keys else 0
+        updated_at = r["updated_at"] if "updated_at" in keys else None
         base_badge = ('<span class="badge badge-late">Late</span>'
                       if r["is_late"] else '<span class="badge badge-submitted">On time</span>')
-        edited_badge = ('<span class="badge badge-edited">Edited</span>'
-                        if "updated_at" in r.keys() and r["updated_at"] else "")
+        edited_badge = edited_badge_html(edit_count, updated_at)
         status = base_badge + edited_badge
+        when = display_time(r["submitted_at"])
+        if updated_at:
+            when += f'<br><span class="muted small">Last updated {display_time(updated_at)}</span>'
         who = ""
         if show_student:
             who = f'<td>{esc(r["student_name"])}<br><span class="muted">{esc(r["student_email"])}</span></td>'
         items.append(
-            f"<tr>{who}<td>{display_time(r['submitted_at'])}</td><td>{status}</td>"
+            f"<tr>{who}<td>{when}</td><td>{status}</td>"
             f'<td><a href="/submissions/{r["id"]}/download">{esc(r["original_name"])}</a></td>'
             f"<td>{r['size_bytes'] // 1024} KB</td></tr>"
         )
@@ -590,12 +663,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     SELECT a.*,
                            (SELECT COUNT(*) FROM submissions s
                              WHERE s.assignment_id = a.id AND s.student_id = ?) AS mine,
-                           (SELECT MAX(CASE WHEN s.updated_at IS NOT NULL THEN 1 ELSE 0 END)
-                              FROM submissions s
-                             WHERE s.assignment_id = a.id AND s.student_id = ?) AS edited
+                           (SELECT MAX(COALESCE(s.edit_count, 0)) FROM submissions s
+                             WHERE s.assignment_id = a.id AND s.student_id = ?) AS edit_count,
+                           (SELECT MAX(s.updated_at) FROM submissions s
+                             WHERE s.assignment_id = a.id AND s.student_id = ?) AS updated_at
                     FROM assignments a ORDER BY a.due_at
                     """,
-                    (user["id"], user["id"]),
+                    (user["id"], user["id"], user["id"]),
                 ).fetchall()
                 body = student_assignments_html(rows)
         self.send_page("Assignments", body)
@@ -620,17 +694,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         is_past_due = now_iso() > a["due_at"]
         deadline_badge = ('<span class="badge badge-past-due">Past due</span>'
                           if is_past_due else '<span class="badge badge-open">Open</span>')
+        countdown = format_time_delta(a["due_at"])
         description_html = esc(a["description"]).replace("\n", "<br>")
-        body = (f'<p class="muted">Due {display_time(a["due_at"])} &middot; '
+        body = (f'<p class="muted">Due {display_time(a["due_at"])} ({esc(countdown)}) &middot; '
                 f'Set by {esc(a["lecturer_name"])} &nbsp;{deadline_badge}</p>'
                 f'<div>{description_html}</div>')
         if user["role"] == "student":
             latest = own_rows[0] if own_rows else None
             if latest and not is_past_due:
+                rev_note = (f" (edited {latest['edit_count']}x)"
+                            if latest["edit_count"] else "")
                 body += f"""
 <div class="edit-box">
 <h2>Edit your submission</h2>
-<p>Current file: <strong>{esc(latest["original_name"])}</strong>. You can replace your submission before the UTC deadline ({display_time(a["due_at"])}).</p>
+<p>Current file: <strong>{esc(latest["original_name"])}</strong>{rev_note}. You can replace your submission before the UTC deadline ({display_time(a["due_at"])}).</p>
 <p class="muted">Allowed file types: {esc(ALLOWED_TEXT)}. Maximum size 10 MB.</p>
 <form method="post" action="/assignments/{aid}/edit" enctype="multipart/form-data">
 <label>Replacement file <input type="file" name="file" required></label>
@@ -692,7 +769,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with closing(connect()) as conn:
             conn.execute(
                 "INSERT INTO submissions (assignment_id, student_id, original_name, stored_name, "
-                "size_bytes, submitted_at, updated_at, is_late) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+                "size_bytes, submitted_at, updated_at, edit_count, is_late) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, 0, ?)",
                 (aid, user["id"], sanitize_filename(original), stored, len(data),
                  submitted_at, is_late),
             )
@@ -736,7 +814,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with closing(connect()) as conn:
             conn.execute(
                 "UPDATE submissions SET original_name = ?, stored_name = ?, "
-                "size_bytes = ?, submitted_at = ?, updated_at = ? WHERE id = ?",
+                "size_bytes = ?, submitted_at = ?, updated_at = ?, "
+                "edit_count = COALESCE(edit_count, 0) + 1 WHERE id = ?",
                 (sanitize_filename(original), stored, len(data),
                  updated_at, updated_at, existing["id"]),
             )
@@ -757,7 +836,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT a.id, a.title, a.due_at, s.id AS sid, s.original_name, s.submitted_at,
-                       s.updated_at, s.is_late,
+                       s.updated_at, COALESCE(s.edit_count, 0) AS edit_count, s.is_late,
                        (SELECT COUNT(*) FROM submissions x
                          WHERE x.assignment_id = a.id AND x.student_id = ?) AS attempts
                 FROM assignments a
