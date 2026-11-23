@@ -1,6 +1,6 @@
 """Tests for the Student Assignment Submission System.
 
-Run with:  python3 -m unittest -v test_app
+Run with:  python3 -m unittest -v Test_app
 """
 import os
 import tempfile
@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from contextlib import closing
+from datetime import datetime, timezone
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
@@ -49,6 +50,12 @@ class UnitTests(unittest.TestCase):
         cleaned = app.sanitize_filename("../../etc/passwd")
         self.assertNotIn("/", cleaned)
         self.assertEqual(cleaned, "passwd")
+
+    def test_format_time_delta(self):
+        ref = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(app.format_time_delta("2026-11-26T15:00:00Z", ref), "Due in 3d 3h")
+        self.assertEqual(app.format_time_delta("2026-11-23T12:45:00Z", ref), "Due in 45m")
+        self.assertEqual(app.format_time_delta("2026-11-21T08:00:00Z", ref), "Overdue by 2d 4h")
 
     def test_account_validation(self):
         self.assertEqual(app.validate_account("", "a@b.co", "longpassword"), "Please enter your name.")
@@ -150,6 +157,11 @@ class EndToEndTests(unittest.TestCase):
         return self.call("POST", f"/assignments/{aid}/submit", body,
                          {"Content-Type": ctype}, student_cookie)
 
+    def edit_submission(self, aid, student_cookie, filename, payload):
+        body, ctype = multipart({}, filename, payload)
+        return self.call("POST", f"/assignments/{aid}/edit", body,
+                         {"Content-Type": ctype}, student_cookie)
+
     # ----- the full workflow
 
     def test_full_workflow(self):
@@ -180,10 +192,12 @@ class EndToEndTests(unittest.TestCase):
         open_id = self.create_assignment(lecturer, open_title, "2030-01-01T12:00")
         late_id = self.create_assignment(lecturer, late_title, "2020-01-01T12:00")
 
-        # Students see the assignments.
+        # Students see the assignments and countdown hints.
         status, _, body = self.call("GET", "/assignments", cookie=student)
         self.assertIn(open_title.encode(), body)
         self.assertIn(late_title.encode(), body)
+        self.assertIn(b"Due in ", body)
+        self.assertIn(b"Overdue by ", body)
 
         # Students submit an allowed file.
         payload = b"%PDF-1.4 fake essay content"
@@ -196,12 +210,13 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(status, 303)
         self.assertIn("not%20allowed", resp.getheader("Location"))
 
-        # Submission status is visible to the student.
+        # Submission status and summary bar are visible to the student.
         status, _, body = self.call("GET", "/my-submissions", cookie=student)
         self.assertEqual(status, 200)
         self.assertIn(b"essay.pdf", body)
         self.assertIn(b"Submitted on time", body)
         self.assertIn(b"Not submitted", body)  # the lab has nothing yet
+        self.assertIn(b"summary-bar", body)
 
         # A late submission is flagged as late.
         status, _, _ = self.submit(late_id, student, "lab.txt", b"late work")
@@ -238,6 +253,76 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(status, 303)
         status, resp, _ = self.call("GET", "/my-submissions", cookie=student)
         self.assertEqual(status, 303)
+
+    def test_edit_submission_before_deadline_replaces_file(self):
+        tag = uuid.uuid4().hex[:8]
+        student = self.register("Edit Student", f"edit-{tag}@uni.edu")
+        lecturer = self.make_lecturer("Dr Edit", f"edit-lec-{tag}@uni.test")
+        aid = self.create_assignment(lecturer, f"Editable {tag}", "2030-01-01T12:00")
+
+        # Initial submission
+        status, _, _ = self.submit(aid, student, "draft.txt", b"first draft")
+        self.assertEqual(status, 303)
+
+        # Detail page shows the edit form while before the UTC deadline
+        status, _, body = self.call("GET", f"/assignments/{aid}", cookie=student)
+        self.assertEqual(status, 200)
+        self.assertIn(b"Edit your submission", body)
+
+        # First replacement before deadline
+        status, resp, _ = self.edit_submission(aid, student, "v2.txt", b"second draft")
+        self.assertEqual(status, 303)
+        self.assertIn("Submission%20updated", resp.getheader("Location"))
+
+        # Second replacement before deadline increments edit counter to 2x
+        status, resp, _ = self.edit_submission(aid, student, "final.pdf", b"%PDF-1.4 revised")
+        self.assertEqual(status, 303)
+
+        # Verify updated filename, Edited 2x badge, Last updated timestamp, and single row
+        status, _, body = self.call("GET", "/my-submissions", cookie=student)
+        self.assertIn(b"final.pdf", body)
+        self.assertNotIn(b"draft.txt", body)
+        self.assertIn(b"Edited 2x", body)
+        self.assertIn(b"Last updated ", body)
+
+        with closing(app.connect()) as conn:
+            rows = conn.execute("SELECT * FROM submissions WHERE assignment_id = ?", (aid,)).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["edit_count"], 2)
+        sid = rows[0]["id"]
+
+        status, _, data = self.call("GET", f"/submissions/{sid}/download", cookie=student)
+        self.assertEqual(status, 200)
+        self.assertEqual(data, b"%PDF-1.4 revised")
+
+    def test_edit_submission_blocked_after_deadline(self):
+        tag = uuid.uuid4().hex[:8]
+        student = self.register("Late Edit Student", f"late-edit-{tag}@uni.edu")
+        lecturer = self.make_lecturer("Dr Lock", f"lock-lec-{tag}@uni.test")
+        aid = self.create_assignment(lecturer, f"Locked {tag}", "2030-01-01T12:00")
+
+        status, _, _ = self.submit(aid, student, "ontime.txt", b"locked content")
+        self.assertEqual(status, 303)
+
+        # Simulate UTC deadline passing
+        with closing(app.connect()) as conn:
+            conn.execute("UPDATE assignments SET due_at = '2020-01-01T12:00:00Z' WHERE id = ?", (aid,))
+            conn.commit()
+
+        # Detail page hides edit form and shows locked message
+        status, _, body = self.call("GET", f"/assignments/{aid}", cookie=student)
+        self.assertEqual(status, 200)
+        self.assertNotIn(b"Edit your submission", body)
+        self.assertIn(b"locked and can no longer be edited", body)
+
+        # Direct POST to /edit is rejected and original file remains untouched
+        status, resp, _ = self.edit_submission(aid, student, "sneaky.txt", b"overwritten")
+        self.assertEqual(status, 303)
+        self.assertIn("Cannot%20edit%20submission", resp.getheader("Location"))
+
+        with closing(app.connect()) as conn:
+            row = conn.execute("SELECT * FROM submissions WHERE assignment_id = ?", (aid,)).fetchone()
+        self.assertEqual(row["original_name"], "ontime.txt")
 
     def test_invalid_registration_does_not_create_user(self):
         test_cases = (
