@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     stored_name TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
     submitted_at TEXT NOT NULL,
+    updated_at TEXT,
     is_late INTEGER NOT NULL DEFAULT 0
 );
 """
@@ -79,6 +80,7 @@ ROUTES = [
     ("GET", r"/assignments", "assignment_list"),
     ("GET", r"/assignments/(?P<aid>\d+)", "assignment_detail"),
     ("POST", r"/assignments/(?P<aid>\d+)/submit", "submit_assignment"),
+    ("POST", r"/assignments/(?P<aid>\d+)/edit", "edit_submission"),
     ("GET", r"/my-submissions", "my_submissions"),
     ("GET", r"/lecturer/assignments/new", "new_assignment_form"),
     ("POST", r"/lecturer/assignments", "create_assignment"),
@@ -100,6 +102,10 @@ def init_db():
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     with closing(connect()) as conn:
         conn.executescript(SCHEMA)
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(submissions)").fetchall()}
+        if "updated_at" not in cols:
+            conn.execute("ALTER TABLE submissions ADD COLUMN updated_at TEXT")
+            conn.commit()
 
 
 def now_iso():
@@ -185,18 +191,26 @@ header a{color:#fff;margin-left:14px;text-decoration:none}
 nav{display:flex;align-items:center;flex-wrap:wrap}
 nav form{display:inline;margin:0 0 0 14px}
 nav button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:3px 10px;cursor:pointer;font:inherit}
-main{max-width:900px;margin:24px auto;background:#fff;padding:24px 32px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+main{max-width:940px;margin:24px auto;background:#fff;padding:24px 32px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 h1{margin-top:0;font-size:1.6rem}
 label{display:block;margin:12px 0}
 input,textarea{display:block;width:100%;box-sizing:border-box;padding:8px;margin-top:4px;border:1px solid #bbb;border-radius:4px;font:inherit}
 textarea{min-height:120px}
 button,.btn{background:#1f3a5f;color:#fff;border:0;border-radius:4px;padding:9px 16px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block;margin-top:8px}
 table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{text-align:left;padding:8px;border-bottom:1px solid #e3e3e3;vertical-align:top}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e3e3e3;vertical-align:middle}
 .notice{background:#e8f4ea;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:4px}
 .error{background:#fdecea;border-left:4px solid #c62828;padding:10px 14px;border-radius:4px}
 .late{color:#b26a00;font-weight:600}
 .muted{color:#666}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:.82rem;font-weight:600;white-space:nowrap}
+.badge-open{background:#e6f4ea;color:#1e6e34}
+.badge-past-due{background:#fdecea;color:#b71c1c}
+.badge-submitted{background:#e6f4ea;color:#1e6e34}
+.badge-missing{background:#fff4e5;color:#9a5b00}
+.badge-late{background:#fff4e5;color:#9a5b00}
+.badge-edited{background:#e8f0fe;color:#174ea6;margin-left:6px}
+.edit-box{background:#f8fafc;border:1px solid #d8e1eb;border-radius:6px;padding:14px 18px;margin-top:16px}
 """
 
 
@@ -269,50 +283,80 @@ def student_assignments_html(rows):
     now = now_iso()
     items = []
     for a in rows:
-        deadline = "Past due" if now > a["due_at"] else "Open"
-        status = "Submitted" if a["mine"] else "Not submitted"
+        is_past_due = now > a["due_at"]
+        deadline = ('<span class="badge badge-past-due">Past due</span>'
+                    if is_past_due else '<span class="badge badge-open">Open</span>')
+        if a["mine"]:
+            edited_tag = '<span class="badge badge-edited">Edited</span>' if a["edited"] else ""
+            status = f'<span class="badge badge-submitted">Submitted</span>{edited_tag}'
+            action = (f'<a href="/assignments/{a["id"]}">View</a>'
+                      if is_past_due else f'<a href="/assignments/{a["id"]}">Edit submission</a>')
+        elif is_past_due:
+            status = '<span class="badge badge-past-due">Missing (Past due)</span>'
+            action = f'<a href="/assignments/{a["id"]}">Submit late</a>'
+        else:
+            status = '<span class="badge badge-missing">Not submitted</span>'
+            action = f'<a href="/assignments/{a["id"]}">Submit</a>'
         items.append(
             f'<tr><td><a href="/assignments/{a["id"]}">{esc(a["title"])}</a></td>'
-            f'<td>{display_time(a["due_at"])}</td><td>{deadline}</td><td>{status}</td></tr>'
+            f'<td>{display_time(a["due_at"])}</td><td>{deadline}</td>'
+            f'<td>{status}</td><td>{action}</td></tr>'
         )
-    return ("<table><tr><th>Assignment</th><th>Due</th><th>Deadline</th><th>Your status</th></tr>"
-            + "".join(items) + "</table>")
+    return ("<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Deadline</th>"
+            "<th>Your status</th><th>Action</th></tr>" + "".join(items) + "</table>")
 
 
 def lecturer_assignments_html(rows):
     button = '<p><a class="btn" href="/lecturer/assignments/new">New assignment</a></p>'
     if not rows:
         return button + "<p>You have not created any assignments yet.</p>"
+    now = now_iso()
     items = []
     for a in rows:
+        deadline = ('<span class="badge badge-past-due">Past due</span>'
+                    if now > a["due_at"] else '<span class="badge badge-open">Open</span>')
         items.append(
             f'<tr><td>{esc(a["title"])}</td><td>{display_time(a["due_at"])}</td>'
-            f'<td>{a["n"]}</td>'
+            f'<td>{deadline}</td><td>{a["n"]}</td>'
             f'<td><a href="/lecturer/assignments/{a["id"]}/submissions">View submissions</a></td></tr>'
         )
-    return (button + "<table><tr><th>Assignment</th><th>Due</th><th>Submissions</th><th></th></tr>"
-            + "".join(items) + "</table>")
+    return (button + "<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Window</th>"
+            "<th>Submissions</th><th></th></tr>" + "".join(items) + "</table>")
 
 
 def my_submissions_html(rows):
     if not rows:
         return "<p>There are no assignments yet.</p>"
+    now = now_iso()
     items = []
     for r in rows:
+        is_past_due = now > r["due_at"]
         if r["sid"] is None:
-            status = "Not submitted"
+            if is_past_due:
+                status = '<span class="badge badge-past-due">Not submitted &middot; Past due</span>'
+                action = f'<a href="/assignments/{r["id"]}">Submit late</a>'
+            else:
+                status = '<span class="badge badge-missing">Not submitted</span>'
+                action = f'<a href="/assignments/{r["id"]}">Submit</a>'
             file_cell = "&mdash;"
             when = "&mdash;"
         else:
-            status = '<span class="late">Submitted late</span>' if r["is_late"] else "Submitted on time"
+            base_badge = ('<span class="badge badge-late">Submitted late</span>'
+                          if r["is_late"] else '<span class="badge badge-submitted">Submitted on time</span>')
+            edited_badge = '<span class="badge badge-edited">Edited</span>' if r["updated_at"] else ""
+            status = base_badge + edited_badge
             file_cell = f'<a href="/submissions/{r["sid"]}/download">{esc(r["original_name"])}</a>'
             when = display_time(r["submitted_at"])
+            action = ('<span class="muted">Locked (past due)</span>'
+                      if is_past_due else f'<a href="/assignments/{r["id"]}">Edit submission</a>')
         items.append(
-            f'<tr><td>{esc(r["title"])}</td><td>{display_time(r["due_at"])}</td>'
-            f"<td>{status}</td><td>{when}</td><td>{file_cell}</td><td>{r['attempts']}</td></tr>"
+            f'<tr><td><a href="/assignments/{r["id"]}">{esc(r["title"])}</a></td>'
+            f'<td>{display_time(r["due_at"])}</td>'
+            f"<td>{status}</td><td>{when}</td><td>{file_cell}</td>"
+            f"<td>{r['attempts']}</td><td>{action}</td></tr>"
         )
-    return ("<table><tr><th>Assignment</th><th>Due</th><th>Status</th><th>Submitted</th>"
-            "<th>Latest file</th><th>Attempts</th></tr>" + "".join(items) + "</table>")
+    return ("<table><tr><th>Assignment</th><th>Due (UTC)</th><th>Status</th><th>Submitted</th>"
+            "<th>Latest file</th><th>Attempts</th><th>Action</th></tr>" + "".join(items) + "</table>")
 
 
 def submissions_table_html(rows, show_student):
@@ -320,7 +364,11 @@ def submissions_table_html(rows, show_student):
         return "<p>No submissions yet.</p>"
     items = []
     for r in rows:
-        status = '<span class="late">Late</span>' if r["is_late"] else "On time"
+        base_badge = ('<span class="badge badge-late">Late</span>'
+                      if r["is_late"] else '<span class="badge badge-submitted">On time</span>')
+        edited_badge = ('<span class="badge badge-edited">Edited</span>'
+                        if "updated_at" in r.keys() and r["updated_at"] else "")
+        status = base_badge + edited_badge
         who = ""
         if show_student:
             who = f'<td>{esc(r["student_name"])}<br><span class="muted">{esc(r["student_email"])}</span></td>'
@@ -408,6 +456,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         fields = {k: v[0] for k, v in
                   parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True).items()}
         return fields, {}
+
+    def validate_upload(self, files):
+        original, data = files.get("file", ("", b""))
+        ext = os.path.splitext(original)[1].lower()
+        if not original or not data:
+            return None, None, None, "Please choose a file to upload."
+        if ext not in ALLOWED_EXTENSIONS:
+            return None, None, None, f"File type '{ext or 'none'}' is not allowed. Allowed types: {ALLOWED_TEXT}."
+        if len(data) > MAX_UPLOAD_BYTES:
+            return None, None, None, "File must be 10 MB or smaller."
+        return original, ext, data, ""
 
     # ----- auth helpers
 
@@ -527,10 +586,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = lecturer_assignments_html(rows)
             else:
                 rows = conn.execute(
-                    "SELECT a.*, (SELECT COUNT(*) FROM submissions s "
-                    "WHERE s.assignment_id = a.id AND s.student_id = ?) AS mine "
-                    "FROM assignments a ORDER BY a.due_at",
-                    (user["id"],),
+                    """
+                    SELECT a.*,
+                           (SELECT COUNT(*) FROM submissions s
+                             WHERE s.assignment_id = a.id AND s.student_id = ?) AS mine,
+                           (SELECT MAX(CASE WHEN s.updated_at IS NOT NULL THEN 1 ELSE 0 END)
+                              FROM submissions s
+                             WHERE s.assignment_id = a.id AND s.student_id = ?) AS edited
+                    FROM assignments a ORDER BY a.due_at
+                    """,
+                    (user["id"], user["id"]),
                 ).fetchall()
                 body = student_assignments_html(rows)
         self.send_page("Assignments", body)
@@ -552,17 +617,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "SELECT * FROM submissions WHERE assignment_id = ? AND student_id = ? "
                     "ORDER BY id DESC", (aid, user["id"])
                 ).fetchall()
+        is_past_due = now_iso() > a["due_at"]
+        deadline_badge = ('<span class="badge badge-past-due">Past due</span>'
+                          if is_past_due else '<span class="badge badge-open">Open</span>')
         description_html = esc(a["description"]).replace("\n", "<br>")
         body = (f'<p class="muted">Due {display_time(a["due_at"])} &middot; '
-                f'Set by {esc(a["lecturer_name"])}</p><div>{description_html}</div>')
+                f'Set by {esc(a["lecturer_name"])} &nbsp;{deadline_badge}</p>'
+                f'<div>{description_html}</div>')
         if user["role"] == "student":
-            body += f"""
+            latest = own_rows[0] if own_rows else None
+            if latest and not is_past_due:
+                body += f"""
+<div class="edit-box">
+<h2>Edit your submission</h2>
+<p>Current file: <strong>{esc(latest["original_name"])}</strong>. You can replace your submission before the UTC deadline ({display_time(a["due_at"])}).</p>
+<p class="muted">Allowed file types: {esc(ALLOWED_TEXT)}. Maximum size 10 MB.</p>
+<form method="post" action="/assignments/{aid}/edit" enctype="multipart/form-data">
+<label>Replacement file <input type="file" name="file" required></label>
+<button>Replace submission</button>
+</form>
+</div>"""
+            elif latest and is_past_due:
+                body += (
+                    '<p class="error">The UTC deadline has passed. Your existing submission is '
+                    'locked and can no longer be edited.</p>'
+                )
+            else:
+                late_note = ('<p class="late">This assignment is past due; any new submission will be marked late.</p>'
+                             if is_past_due else "")
+                body += f"""
 <h2>Submit your work</h2>
+{late_note}
 <p class="muted">Allowed file types: {esc(ALLOWED_TEXT)}. Maximum size 10 MB.</p>
 <form method="post" action="/assignments/{aid}/submit" enctype="multipart/form-data">
 <label>File <input type="file" name="file" required></label>
 <button>Submit</button>
-</form>
+</form>"""
+            body += f"""
 <h2>Your submissions</h2>
 {submissions_table_html(own_rows, show_student=False)}"""
         else:
@@ -576,18 +667,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         with closing(connect()) as conn:
             a = conn.execute("SELECT * FROM assignments WHERE id = ?", (aid,)).fetchone()
-        if a is None:
-            return self.deny(404, "Not found", "That assignment does not exist.")
-        fields, files = self.read_form()
-        original, data = files.get("file", ("", b""))
-        ext = os.path.splitext(original)[1].lower()
-        error = ""
-        if not original or not data:
-            error = "Please choose a file to upload."
-        elif ext not in ALLOWED_EXTENSIONS:
-            error = f"File type '{ext or 'none'}' is not allowed. Allowed types: {ALLOWED_TEXT}."
-        elif len(data) > MAX_UPLOAD_BYTES:
-            error = "File must be 10 MB or smaller."
+            if a is None:
+                return self.deny(404, "Not found", "That assignment does not exist.")
+            existing = conn.execute(
+                "SELECT id FROM submissions WHERE assignment_id = ? AND student_id = ? LIMIT 1",
+                (aid, user["id"]),
+            ).fetchone()
+        if existing and now_iso() > a["due_at"]:
+            return self.send_redirect(
+                f"/assignments/{aid}?err="
+                + quote("Deadline has passed; existing submissions cannot be replaced.")
+            )
+        _, files = self.read_form()
+        original, ext, data, error = self.validate_upload(files)
         if error:
             return self.send_redirect(f"/assignments/{aid}?err=" + quote(error))
 
@@ -600,13 +692,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with closing(connect()) as conn:
             conn.execute(
                 "INSERT INTO submissions (assignment_id, student_id, original_name, stored_name, "
-                "size_bytes, submitted_at, is_late) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "size_bytes, submitted_at, updated_at, is_late) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
                 (aid, user["id"], sanitize_filename(original), stored, len(data),
                  submitted_at, is_late),
             )
             conn.commit()
         msg = "Submitted late. Your work has been recorded." if is_late else "Assignment submitted."
         self.send_redirect("/my-submissions?msg=" + quote(msg))
+
+    def edit_submission(self, aid):
+        user = self.require_user("student")
+        if user is None:
+            return
+        with closing(connect()) as conn:
+            a = conn.execute("SELECT * FROM assignments WHERE id = ?", (aid,)).fetchone()
+            if a is None:
+                return self.deny(404, "Not found", "That assignment does not exist.")
+            existing = conn.execute(
+                "SELECT * FROM submissions WHERE assignment_id = ? AND student_id = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (aid, user["id"]),
+            ).fetchone()
+        if now_iso() > a["due_at"]:
+            return self.send_redirect(
+                f"/assignments/{aid}?err="
+                + quote("Cannot edit submission after the UTC deadline.")
+            )
+        if existing is None:
+            return self.send_redirect(
+                f"/assignments/{aid}?err="
+                + quote("No existing submission found to edit.")
+            )
+        _, files = self.read_form()
+        original, ext, data, error = self.validate_upload(files)
+        if error:
+            return self.send_redirect(f"/assignments/{aid}?err=" + quote(error))
+
+        stored = f"{uuid.uuid4().hex}{ext}"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        with open(os.path.join(UPLOAD_DIR, stored), "wb") as fh:
+            fh.write(data)
+        updated_at = now_iso()
+        with closing(connect()) as conn:
+            conn.execute(
+                "UPDATE submissions SET original_name = ?, stored_name = ?, "
+                "size_bytes = ?, submitted_at = ?, updated_at = ? WHERE id = ?",
+                (sanitize_filename(original), stored, len(data),
+                 updated_at, updated_at, existing["id"]),
+            )
+            conn.commit()
+        old_path = os.path.join(UPLOAD_DIR, os.path.basename(existing["stored_name"]))
+        if os.path.isfile(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+        self.send_redirect("/my-submissions?msg=" + quote("Submission updated before the deadline."))
 
     def my_submissions(self):
         user = self.require_user("student")
@@ -616,7 +757,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT a.id, a.title, a.due_at, s.id AS sid, s.original_name, s.submitted_at,
-                       s.is_late,
+                       s.updated_at, s.is_late,
                        (SELECT COUNT(*) FROM submissions x
                          WHERE x.assignment_id = a.id AND x.student_id = ?) AS attempts
                 FROM assignments a
