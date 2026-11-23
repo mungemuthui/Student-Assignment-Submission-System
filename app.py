@@ -32,6 +32,8 @@ PBKDF2_ITERATIONS = 200_000
 SESSION_COOKIE = "sas_session"
 DATE_FMT = "%Y-%m-%dT%H:%M:%SZ"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+STUDENT_EMAIL_DOMAIN = "uni.edu"
+STUDENT_MIN_PASSWORD_LENGTH = 12
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -126,13 +128,16 @@ def verify_password(password, stored):
     return hmac.compare_digest(digest.hex(), digest_hex)
 
 
-def validate_account(name, email, password):
+def validate_account(name, email, password, student_registration=False):
     if not name:
         return "Please enter your name."
     if not EMAIL_RE.match(email):
         return "Please enter a valid email address."
-    if len(password) < 8:
-        return "Password must be at least 8 characters."
+    if student_registration and email.rsplit("@", 1)[1].lower() != STUDENT_EMAIL_DOMAIN:
+        return "Please use your @uni.edu email address."
+    min_password_length = STUDENT_MIN_PASSWORD_LENGTH if student_registration else 8
+    if len(password) < min_password_length:
+        return f"Password must be at least {min_password_length} characters."
     return ""
 
 
@@ -231,8 +236,8 @@ def register_form_html(error="", name="", email=""):
     return f"""{error_block(error)}
 <form method="post" action="/register">
 <label>Full name <input name="name" value="{esc(name)}" maxlength="100" required></label>
-<label>Email <input type="email" name="email" value="{esc(email)}" required></label>
-<label>Password (at least 8 characters) <input type="password" name="password" minlength="8" required></label>
+<label>Email (@uni.edu) <input type="email" name="email" value="{esc(email)}" required></label>
+<label>Password (at least 12 characters) <input type="password" name="password" minlength="12" required></label>
 <button>Create account</button>
 </form>
 <p class="muted">Lecturer accounts are created by the system administrator.</p>"""
@@ -453,7 +458,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         name = fields.get("name", "").strip()
         email = fields.get("email", "").strip().lower()
         password = fields.get("password", "")
-        error = validate_account(name, email, password)
+        error = validate_account(name, email, password, student_registration=True)
         user_id = None
         if not error:
             try:

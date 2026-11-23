@@ -57,6 +57,31 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(app.validate_account("A", "a@b.co", "short"),
                          "Password must be at least 8 characters.")
         self.assertEqual(app.validate_account("A", "a@b.co", "longpassword"), "")
+        self.assertEqual(
+            app.validate_account("A", "Student@UNI.EDU", "Correct-Horse-Battery",
+                                 student_registration=True),
+            "",
+        )
+        self.assertEqual(
+            app.validate_account("A", "student@example.com", "Correct-Horse-Battery",
+                                 student_registration=True),
+            "Please use your @uni.edu email address.",
+        )
+        self.assertEqual(
+            app.validate_account("A", "student@uni.edu.attacker", "Correct-Horse-Battery",
+                                 student_registration=True),
+            "Please use your @uni.edu email address.",
+        )
+        self.assertEqual(
+            app.validate_account("A", "student@uni.edu", "12345678",
+                                 student_registration=True),
+            "Password must be at least 12 characters.",
+        )
+        self.assertEqual(
+            app.validate_account("A", "student@uni.edu", "Short-Pass1",
+                                 student_registration=True),
+            "Password must be at least 12 characters.",
+        )
 
 
 class EndToEndTests(unittest.TestCase):
@@ -89,7 +114,7 @@ class EndToEndTests(unittest.TestCase):
         return self.call(method, path, urlencode(fields).encode(),
                          {"Content-Type": "application/x-www-form-urlencoded"}, cookie)
 
-    def register(self, name, email, password="password123"):
+    def register(self, name, email, password="Correct-Horse-Battery"):
         status, resp, _ = self.form("POST", "/register",
                                     {"name": name, "email": email, "password": password})
         self.assertEqual(status, 303)
@@ -129,8 +154,8 @@ class EndToEndTests(unittest.TestCase):
 
     def test_full_workflow(self):
         tag = uuid.uuid4().hex[:8]
-        student_email = f"stu-{tag}@uni.test"
-        other_email = f"other-{tag}@uni.test"
+        student_email = f"stu-{tag}@uni.edu"
+        other_email = f"other-{tag}@uni.edu"
         lecturer_email = f"lec-{tag}@uni.test"
 
         # Unauthenticated users are sent to the login page.
@@ -213,6 +238,25 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(status, 303)
         status, resp, _ = self.call("GET", "/my-submissions", cookie=student)
         self.assertEqual(status, 303)
+
+    def test_invalid_registration_does_not_create_user(self):
+        test_cases = (
+            (f"wrong-domain-{uuid.uuid4().hex}@example.com",
+             "Correct-Horse-Battery", "Please use your @uni.edu email address."),
+            (f"short-password-{uuid.uuid4().hex}@uni.edu",
+             "12345678", "Password must be at least 12 characters."),
+        )
+
+        for email, password, expected_error in test_cases:
+            status, _, body = self.form(
+                "POST", "/register",
+                {"name": "Test Student", "email": email, "password": password},
+            )
+            self.assertEqual(status, 400)
+            self.assertIn(expected_error.encode(), body)
+            with closing(app.connect()) as conn:
+                user = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+            self.assertIsNone(user)
 
 
 if __name__ == "__main__":
