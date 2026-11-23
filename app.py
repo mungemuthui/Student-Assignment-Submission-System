@@ -33,7 +33,7 @@ SESSION_COOKIE = "sas_session"
 DATE_FMT = "%Y-%m-%dT%H:%M:%SZ"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 STUDENT_EMAIL_DOMAIN = "uni.edu"
-STUDENT_MIN_PASSWORD_LENGTH = 12
+STUDENT_MIN_PASSWORD_LENGTH = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
