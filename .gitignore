@@ -1,0 +1,6 @@
+submissions.db
+*.pyc
+__pycache__/
+.env
+.venv/
+uploads/*

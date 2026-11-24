@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Submissions{% endblock %}
+{% block content %}
+<h2>{{ assignment.title }}</h2>
+<p>{{ assignment.description }}</p>
+<p>
+  <strong>Due:</strong>
+  {{ assignment.due_date.strftime('%d %b %Y, %H:%M') if assignment.due_date else 'No deadline' }}
+  &middot; <strong>{{ assignment.submissions|length }}</strong> submission(s)
+</p>
+<table>
+  <tr><th>Student</th><th>Email</th><th>Status</th><th>File</th><th>Submitted at</th><th>Mark / feedback</th></tr>
+  {% for s in assignment.submissions|sort(attribute='submitted_at') %}
+  <tr>
+    <td>{{ s.student.name }}</td>
+    <td>{{ s.student.email }}</td>
+    <td><span class="badge submitted">{{ s.status }}</span></td>
+    <td><a href="{{ url_for('download_submission', submission_id=s.id) }}">{{ s.original_filename }}</a></td>
+    <td>{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+    <td>
+      <form method="post" action="{{ url_for('mark_submission', submission_id=s.id) }}">
+        <label>Mark out of 100
+          <input type="number" name="score" min="0" max="100" step="0.1"
+                 value="{{ s.score if s.score is not none else '' }}" required>
+        </label>
+        <label>Feedback
+          <textarea name="feedback" rows="2">{{ s.feedback or '' }}</textarea>
+        </label>
+        <button type="submit">Save mark</button>
+      </form>
+      {% if s.marked_at %}<small>Marked {{ s.marked_at.strftime('%d %b %Y, %H:%M') }}</small>{% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">No submissions yet.</td></tr>
+  {% endfor %}
+</table>
+<p><a href="{{ url_for('lecturer_dashboard') }}">&larr; Back to dashboard</a></p>
+{% endblock %}

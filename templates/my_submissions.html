@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}My Submissions{% endblock %}
+{% block content %}
+<h2>My Submission Status</h2>
+<table>
+  <tr><th>Assignment</th><th>Due</th><th>Status</th><th>File</th><th>Submitted at</th><th>Mark / feedback</th></tr>
+  {% for row in rows %}
+  {% set a = row.assignment %}
+  {% set s = row.submission %}
+  <tr>
+    <td>{{ a.title }}</td>
+    <td>{{ a.due_date.strftime('%d %b %Y, %H:%M') if a.due_date else '-' }}</td>
+    <td>
+      {% if s %}<span class="badge submitted">{{ s.status }}</span>
+      {% elif a.is_past_due() %}<span class="badge not">Overdue</span>
+      {% else %}<span class="badge not">Not submitted</span>{% endif %}
+    </td>
+    <td>
+      {% if s %}<a href="{{ url_for('download_submission', submission_id=s.id) }}">{{ s.original_filename }}</a>
+      {% else %}-{% endif %}
+    </td>
+    <td>{{ s.submitted_at.strftime('%d %b %Y, %H:%M') if s else '-' }}</td>
+    <td>
+      {% if s and s.score is not none %}
+        {{ '%.1f'|format(s.score) }} / 100
+        {% if s.feedback %}<br>{{ s.feedback }}{% endif %}
+      {% else %}-{% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">No assignments yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

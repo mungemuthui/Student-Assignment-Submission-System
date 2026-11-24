@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Submit{% endblock %}
+{% block content %}
+<h2>{{ assignment.title }}</h2>
+<p>{{ assignment.description }}</p>
+<p>
+  <strong>Due:</strong>
+  {{ assignment.due_date.strftime('%d %b %Y, %H:%M') if assignment.due_date else 'No deadline' }}
+  {% if assignment.is_past_due() %}<span class="badge not">Deadline passed. This submission will be marked late.</span>{% endif %}
+</p>
+{% if existing %}
+<p>You have already submitted <em>{{ existing.original_filename }}</em> on {{ existing.submitted_at.strftime('%d %b %Y, %H:%M') }}. Uploading again will replace it.</p>
+{% endif %}
+<form method="post" enctype="multipart/form-data">
+  <label>Choose file (pdf, docx, zip, txt)
+    <input type="file" name="file" accept=".pdf,.docx,.zip,.txt" required>
+  </label>
+  <button type="submit">{{ 'Resubmit' if existing else 'Submit' }}</button>
+</form>
+<p><a href="{{ url_for('student_assignments') }}">&larr; Back to assignments</a></p>
+{% endblock %}

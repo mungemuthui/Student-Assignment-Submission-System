@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h2>My Assignments</h2>
+<a class="btn" href="{{ url_for('create_assignment') }}">+ Create assignment</a>
+<table>
+  <tr><th>Title</th><th>Due</th><th>Submissions</th><th></th></tr>
+  {% for a in assignments %}
+  <tr>
+    <td>{{ a.title }}</td>
+    <td>{{ a.due_date.strftime('%d %b %Y, %H:%M') if a.due_date else 'No deadline' }}</td>
+    <td>{{ a.submissions|length }}</td>
+    <td><a href="{{ url_for('view_submissions', assignment_id=a.id) }}">View submissions</a></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">You have not created any assignments yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

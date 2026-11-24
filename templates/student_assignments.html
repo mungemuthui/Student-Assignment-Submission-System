@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Assignments{% endblock %}
+{% block content %}
+<h2>Available Assignments</h2>
+{% if assignments %}
+<table>
+  <tr><th>Title</th><th>Due</th><th>Status</th><th></th></tr>
+  {% for a in assignments %}
+  {% set sub = a.submission_for(current_user) %}
+  <tr>
+    <td>{{ a.title }}</td>
+    <td>{{ a.due_date.strftime('%d %b %Y, %H:%M') if a.due_date else 'No deadline' }}</td>
+    <td>
+      {% if sub %}<span class="badge submitted">{{ sub.status }}</span>
+      {% else %}<span class="badge not">Not submitted</span>{% endif %}
+    </td>
+    <td><a class="btn" href="{{ url_for('submit_assignment', assignment_id=a.id) }}">{{ 'Resubmit' if sub else 'Submit' }}</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>No assignments available yet.</p>
+{% endif %}
+{% endblock %}
