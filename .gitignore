@@ -1,6 +1,1 @@
-submissions.db
-*.pyc
-__pycache__/
-.env
-.venv/
-uploads/*
+submissions.db*.pyc__pycache__/.env.venv/uploads/*
